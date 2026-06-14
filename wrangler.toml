@@ -1,0 +1,13 @@
+name = "blog-worker"
+main = "index.js"
+compatibility_date = "2026-01-01"
+
+# D1绑定
+[[d1_databases]]
+binding = "DB"
+database_name = "blog"
+database_id = "d13e6453-9420-432c-b67c-4f0bd71ccc77"
+
+# 环境变量（本地调试用，线上在后台填更安全）
+[vars]
+TURNSTILE_SECRET = "xxx"
