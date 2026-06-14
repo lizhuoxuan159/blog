@@ -1,5 +1,5 @@
 const WORKER_BASE = "https://blog.lizhuoxuan.dpdns.org";
-const TURNSTILE_SITEKEY = "0x4AAAAAAACqx_2fZzYHAdKA2";
+const TURNSTILE_SITEKEY = "0x4AAAAAACqx_2fZzYHAdKA2";
 
 // 页面加载时统计访问
 function sendVisitStat(postPath) {
