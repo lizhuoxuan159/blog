@@ -1,5 +1,5 @@
-const WORKER_BASE = "https://你的worker地址.workers.dev";
-const TURNSTILE_SITEKEY = "你的Turnstile SiteKey";
+const WORKER_BASE = "https://blog.lizhuoxuan.dpdns.org";
+const TURNSTILE_SITEKEY = "0x4AAAAAAACqx_2fZzYHAdKA2";
 
 // 页面加载时统计访问
 function sendVisitStat(postPath) {
