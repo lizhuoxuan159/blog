@@ -1,8 +1,8 @@
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    // 已替换为你的账号+仓库
-    const GH_RAW_BASE = "https://raw.githubusercontent.com/lizhuoxuan159/blog/main";
+    // 替换为jsdelivr国内加速源，解决raw访问异常
+    const GH_CDN_BASE = "https://cdn.jsdelivr.net/gh/lizhuoxuan159/blog@main";
     const TURNSTILE_SECRET = env.TURNSTILE_SECRET;
 
     // 1. 提交评论 POST
@@ -29,20 +29,46 @@ export default {
       return await getPostViewCount(post, env);
     }
 
-    // 反向代理GitHub静态文件
+    // 反向代理静态文件路径处理
     let targetPath = url.pathname;
     if (targetPath === "/") targetPath = "/index.html";
-    const ghUrl = new URL(GH_RAW_BASE + targetPath);
-    const res = await fetch(ghUrl);
+    const ghUrl = new URL(GH_CDN_BASE + targetPath);
+    
+    let res;
+    try {
+      res = await fetch(ghUrl);
+    } catch (e) {
+      return new Response("静态资源加载失败", { status: 502 });
+    }
 
-    return new Response(res.body, {
+    // 文件不存在返回404
+    if (!res.ok) {
+      return new Response("页面不存在", { status: 404 });
+    }
+
+    // 手动匹配正确MIME类型，修复源码直接输出问题
+    const bodyText = await res.text();
+    const contentType = getMimeType(targetPath);
+
+    return new Response(bodyText, {
       headers: {
-        "content-type": res.headers.get("content-type"),
+        "Content-Type": contentType,
         "cache-control": "public, max-age=180"
       }
     });
   }
 };
+
+// 匹配文件对应的MIME类型（核心修复渲染问题）
+function getMimeType(path) {
+  if (path.endsWith(".html")) return "text/html; charset=utf-8";
+  if (path.endsWith(".css")) return "text/css; charset=utf-8";
+  if (path.endsWith(".js")) return "application/javascript; charset=utf-8";
+  if (path.endsWith(".md")) return "text/markdown; charset=utf-8";
+  if (path.endsWith(".png")) return "image/png";
+  if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+  return "text/plain; charset=utf-8";
+}
 
 // Turnstile人机验证校验
 async function verifyTurnstile(token, secret) {
