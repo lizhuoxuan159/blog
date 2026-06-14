@@ -1,0 +1,130 @@
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const GH_RAW_BASE = "https://raw.githubusercontent.com/你的github用户名/blog-static/main";
+    const TURNSTILE_SECRET = env.TURNSTILE_SECRET;
+
+    // 1. 提交评论接口 POST
+    if (url.pathname === "/api/comment/submit" && request.method === "POST") {
+      return await handleSubmitComment(request, env, TURNSTILE_SECRET);
+    }
+
+    // 2. 获取文章评论列表 GET
+    if (url.pathname === "/api/comment/list") {
+      const post = url.searchParams.get("post");
+      return await getCommentList(post, env);
+    }
+
+    // 3. 访问统计埋点
+    if (url.pathname === "/api/visit") {
+      const post = url.searchParams.get("post");
+      await recordVisit(post, request, env);
+      return Response.json({ success: true });
+    }
+
+    // 4. 获取文章阅读量
+    if (url.pathname === "/api/stats/view") {
+      const post = url.searchParams.get("post");
+      return await getPostViewCount(post, env);
+    }
+
+    // 静态资源反向代理GitHub raw
+    let targetPath = url.pathname;
+    if (targetPath === "/") targetPath = "/index.html";
+    const ghUrl = new URL(GH_RAW_BASE + targetPath);
+    const res = await fetch(ghUrl);
+
+    return new Response(res.body, {
+      headers: {
+        "content-type": res.headers.get("content-type"),
+        "cache-control": "public, max-age=180"
+      }
+    });
+  }
+};
+
+// Turnstile 验证函数
+async function verifyTurnstile(token, secret) {
+  const formData = new FormData();
+  formData.append("secret", secret);
+  formData.append("response", token);
+  const verifyRes = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    method: "POST",
+    body: formData
+  });
+  return await verifyRes.json();
+}
+
+// XSS简单转义过滤
+function escapeHtml(str) {
+  return str
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+// 提交评论逻辑
+async function handleSubmitComment(req, env, secret) {
+  try {
+    const body = await req.json();
+    const { token, content, post } = body;
+
+    if (!token || !content || !post) {
+      return Response.json({ success: false, msg: "参数缺失" }, { status: 400 });
+    }
+
+    // 人机校验
+    const verify = await verifyTurnstile(token, secret);
+    if (!verify.success) {
+      return Response.json({ success: false, msg: "人机验证失败" }, { status: 403 });
+    }
+
+    // 内容过滤与长度限制
+    const safeContent = escapeHtml(content.slice(0, 1000));
+    const clientIp = req.headers.get("cf-connecting-ip") || "";
+    const ua = req.headers.get("user-agent") || "";
+
+    // D1插入SQL
+    await env.DB.prepare(`
+      INSERT INTO comments (post_path, content, ip, ua)
+      VALUES (?, ?, ?, ?)
+    `).bind(post, safeContent, clientIp, ua).run();
+
+    return Response.json({ success: true, msg: "评论发布成功" });
+  } catch (err) {
+    return Response.json({ success: false, msg: "服务器异常：" + err.message }, { status: 500 });
+  }
+}
+
+// 查询文章评论列表
+async function getCommentList(postPath, env) {
+  if (!postPath) return Response.json([], { status: 400 });
+  const { results } = await env.DB.prepare(`
+    SELECT id, content, create_time FROM comments
+    WHERE post_path = ?
+    ORDER BY create_time DESC
+  `).bind(postPath).all();
+  return Response.json(results);
+}
+
+// 记录访问
+async function recordVisit(postPath, req, env) {
+  if (!postPath) return;
+  const ip = req.headers.get("cf-connecting-ip") || "";
+  const ua = req.headers.get("user-agent") || "";
+  await env.DB.prepare(`
+    INSERT INTO visit_stats (post_path, ip, ua)
+    VALUES (?, ?, ?)
+  `).bind(postPath, ip, ua).run();
+}
+
+// 获取阅读总数
+async function getPostViewCount(postPath, env) {
+  const { results } = await env.DB.prepare(`
+    SELECT total_visits FROM post_view_count WHERE post_path = ?
+  `).bind(postPath).all();
+  const count = results.length ? results[0].total_visits : 0;
+  return Response.json({ count });
+}
