@@ -1,15 +1,16 @@
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const GH_RAW_BASE = "https://raw.githubusercontent.com/你的github用户名/blog-static/main";
+    // ========== 这里改成仓库名 blog ==========
+    const GH_RAW_BASE = "https://raw.githubusercontent.com/替换成你的用户名/blog/main";
     const TURNSTILE_SECRET = env.TURNSTILE_SECRET;
 
-    // 1. 提交评论接口 POST
+    // 1. 提交评论 POST
     if (url.pathname === "/api/comment/submit" && request.method === "POST") {
       return await handleSubmitComment(request, env, TURNSTILE_SECRET);
     }
 
-    // 2. 获取文章评论列表 GET
+    // 2. 获取评论列表 GET
     if (url.pathname === "/api/comment/list") {
       const post = url.searchParams.get("post");
       return await getCommentList(post, env);
@@ -28,7 +29,7 @@ export default {
       return await getPostViewCount(post, env);
     }
 
-    // 静态资源反向代理GitHub raw
+    // 反向代理 GitHub 静态文件
     let targetPath = url.pathname;
     if (targetPath === "/") targetPath = "/index.html";
     const ghUrl = new URL(GH_RAW_BASE + targetPath);
@@ -43,7 +44,7 @@ export default {
   }
 };
 
-// Turnstile 验证函数
+// Turnstile人机验证校验
 async function verifyTurnstile(token, secret) {
   const formData = new FormData();
   formData.append("secret", secret);
@@ -55,7 +56,7 @@ async function verifyTurnstile(token, secret) {
   return await verifyRes.json();
 }
 
-// XSS简单转义过滤
+// XSS HTML转义防护
 function escapeHtml(str) {
   return str
     .replaceAll("&", "&amp;")
@@ -75,18 +76,15 @@ async function handleSubmitComment(req, env, secret) {
       return Response.json({ success: false, msg: "参数缺失" }, { status: 400 });
     }
 
-    // 人机校验
     const verify = await verifyTurnstile(token, secret);
     if (!verify.success) {
       return Response.json({ success: false, msg: "人机验证失败" }, { status: 403 });
     }
 
-    // 内容过滤与长度限制
     const safeContent = escapeHtml(content.slice(0, 1000));
     const clientIp = req.headers.get("cf-connecting-ip") || "";
     const ua = req.headers.get("user-agent") || "";
 
-    // D1插入SQL
     await env.DB.prepare(`
       INSERT INTO comments (post_path, content, ip, ua)
       VALUES (?, ?, ?, ?)
@@ -98,7 +96,7 @@ async function handleSubmitComment(req, env, secret) {
   }
 }
 
-// 查询文章评论列表
+// 查询文章评论
 async function getCommentList(postPath, env) {
   if (!postPath) return Response.json([], { status: 400 });
   const { results } = await env.DB.prepare(`
@@ -109,7 +107,7 @@ async function getCommentList(postPath, env) {
   return Response.json(results);
 }
 
-// 记录访问
+// 记录访问数据
 async function recordVisit(postPath, req, env) {
   if (!postPath) return;
   const ip = req.headers.get("cf-connecting-ip") || "";
@@ -120,7 +118,7 @@ async function recordVisit(postPath, req, env) {
   `).bind(postPath, ip, ua).run();
 }
 
-// 获取阅读总数
+// 获取阅读总量
 async function getPostViewCount(postPath, env) {
   const { results } = await env.DB.prepare(`
     SELECT total_visits FROM post_view_count WHERE post_path = ?
